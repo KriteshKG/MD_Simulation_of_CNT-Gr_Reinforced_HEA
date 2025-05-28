@@ -1,0 +1,105 @@
+variable 		T equal 300
+variable 		srate equal 1.0e9
+variable 		srate1 equal "v_srate/1.0e12"
+neighbor		3.0 bin
+neigh_modify 	every 	2 delay 10 check yes 
+
+#----------------------Initialization--------------------
+
+units 			metal
+dimension		3
+boundary		p  p  p
+atom_style		atomic
+
+#------------------Atom Definition-----------------------
+
+read_data		HEA.data
+change_box 		all x final $(bound(all,xmin)-5) $(bound(all,xmax)+5) &
+					y final $(bound(all,ymin)-5) $(bound(all,ymax)+5) &
+					z final $(bound(all,zmin)-5) $(bound(all,zmax)+5) units box 
+					
+##----------------  potential----------------------
+
+pair_style 		eam/alloy 
+pair_coeff 		* * _FeNiCrCoAl.eam.alloy Al Ni Cr Fe Co
+
+##---------------------SETTINGS-------------------------
+
+compute  		csym all centro/atom fcc
+compute  		peratom all pe/atom
+compute  		st all stress/atom NULL #virial
+compute  		3 all reduce sum c_st[1] c_st[2] c_st[3] c_st[4] c_st[5] c_st[6]
+compute			Stresses	all	reduce	ave	c_st[1]	c_st[2]	c_st[3]
+
+# ================Define groups============================
+
+region 			boundary_zlo block INF INF INF INF INF $(bound(all,zmin)+30) units box
+group 			boundary_zlo region boundary_zlo
+region 			boundary_zhi block INF INF INF INF $(bound(all,zmax)-30) INF units box
+group 			boundary_zhi region boundary_zhi
+group			fixed_boundary union boundary_zlo boundary_zhi
+
+#---------------Energy Equilibriation------------------------
+
+reset_timestep 	0 
+min_style 		cg 
+minimize 		1e-4 1e-8 10000 100000 
+
+#----------------- Equilibriation 300k--------------------
+reset_timestep	0
+timestep 		0.001
+velocity  		all create ${T} 1234567 dist gaussian mom yes rot yes
+fix 			3 all npt temp ${T} ${T} 0.1 iso 0.0 0.0 1 drag 1
+fix 			4 all ave/atom 1 1000 1000 c_st[1] c_st[2] c_st[3] c_peratom fx fy fz
+fix				5 all temp/rescale 5 ${T} ${T} 0.1 1
+thermo 			100
+thermo_style 	custom step time temp pe ke lx ly lz vol density press 
+dump 			2 all custom 5000 dump.1equilibrate_${T}_.*.custom id mass type x y z c_peratom 
+dump_modify 	2 	element Al Ni Cr Fe Co
+
+fix 			55 fixed_boundary setforce 0 0 0
+velocity		fixed_boundary set 0 0 0 units box
+
+run  			100000
+unfix 			3
+unfix 			4
+unfix 			5
+undump 			2
+
+write_data		_equilibrated.dat
+
+change_box 		all x final $(bound(all,xmin)) $(bound(all,xmax)) &
+					y final $(bound(all,ymin)) $(bound(all,ymax)) &
+					z final $(bound(all,zmin)) $(bound(all,zmax)) units box 
+change_box 		all boundary f f f remap units box
+
+# ---------------DEFORMATION in z direction------------------------
+				#store final cell length for strain calculation
+variable        tmp equal "lz"
+variable        Lo equal ${tmp}
+print 			"Initial Length, Lo: ${Lo}"
+
+# ---------------DEFORMATION in z direction------------------------
+
+reset_timestep	0
+
+fix				3 all nvt temp ${T} ${T} 1
+fix 			5 all deform 1 z erate ${srate1} units box remap x
+variable      	strainz equal "(lz-v_Lo)/v_Lo"			
+variable 		sigma_x equal "-pxx/10000"
+variable 		sigma_y equal "-pyy/10000"
+variable 		sigma_z equal "-pzz/10000"
+
+thermo 			100
+thermo_style 	custom step time temp pe ke lx ly lz vol density press 
+thermo_modify 	lost ignore flush yes
+
+dump   			mydump all custom 1000 dump.tensile_.*.custom id mass type x y z c_st[1] c_st[2] c_st[3] c_peratom c_csym fx fy fz
+fix 			7 all print 100 "${strainz} ${sigma_z}"  file _stressvstrain.txt screen no
+
+run				500000
+
+#--------------Simulation Done-------------------
+# SIMULATION DONE
+print "All done"
+
