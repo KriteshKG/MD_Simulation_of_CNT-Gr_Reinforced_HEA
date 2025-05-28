@@ -1,0 +1,27 @@
+units 			metal
+dimension 		3
+boundary 		p p p
+atom_style 		atomic
+variable		l equal 14.18
+variable		timestep1 equal 0.001
+
+read_data		HEA_CNT(4,4,14.90).dat
+
+pair_style 		hybrid eam/alloy airebo 3.0 1 0 lj/cut 10.5  
+pair_coeff 		* * eam/alloy _FeNiCrCoAl.eam.alloy Al Ni Cr Fe Co NULL 
+pair_coeff		* * airebo CH.airebo NULL NULL NULL NULL NULL C 
+
+pair_coeff		1 6 lj/cut 0.03061 3.015	#Al-C
+pair_coeff		2 6 lj/cut 0.03525 2.846	#Ni-C
+pair_coeff		3 6 lj/cut 0.03464 2.873	#Cr-C
+pair_coeff		4 6 lj/cut 0.03549 2.865 	#Fe-C
+pair_coeff		5 6 lj/cut 0.03512 2.847	#Co-C
+
+group			AlCoCrFeNi type 1 2 3 4 5		
+group			C type 6 			
+
+delete_atoms overlap 3.4 AlCoCrFeNi C
+
+write_data		dlt_HEA_CNT(4,4,14.90).dat 
+
+run 			0
